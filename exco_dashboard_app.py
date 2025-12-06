@@ -322,12 +322,21 @@ def apply_global_styles() -> None:
     )
 
 
-def render_header(df: pd.DataFrame, selected_sheet: str, is_sii: bool = False) -> None:
-    """Display the hero header with title, context, and snapshot timestamp."""
+@lru_cache(maxsize=1)
+def get_data_snapshot_date() -> str:
+    """Get the file modification date of the data file as snapshot timestamp."""
+    if DATA_FILE.exists():
+        mod_time = datetime.fromtimestamp(DATA_FILE.stat().st_mtime)
+        return mod_time.strftime("%d %b %Y")
+    return datetime.today().strftime("%d %b %Y")
 
-    # Always use today's date as the snapshot date
-    snapshot_date = datetime.today().strftime("%d %b %Y")
-    
+
+def render_header(df: pd.DataFrame, selected_sheet: str, is_sii: bool = False) -> None:
+    """Display the hero header with logo, title, context, and snapshot timestamp."""
+
+    # Use file modification date as snapshot date (updates only when new data is loaded)
+    snapshot_date = get_data_snapshot_date()
+
     sheet_label = "SII Action Plans" if is_sii else "Open Recommendations"
     total_count = len(df)
 
@@ -340,26 +349,29 @@ def render_header(df: pd.DataFrame, selected_sheet: str, is_sii: bool = False) -
         gradient = "linear-gradient(135deg, #e8f4f8 0%, #d1e8f0 50%, #b8dce8 100%)"
         badge_bg = "rgba(30, 80, 120, 0.08)"
         text_color = "#1a365d"
-    
-    st.markdown(
-        f"""
-        <div style="background: {gradient}; padding: 1.8rem 2.2rem; border-radius: 1.2rem; margin-bottom: 1.2rem; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); border: 1px solid rgba(0,0,0,0.05);">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; flex-wrap: wrap;">
-                <div style="flex: 1 1 60%; min-width: 240px;">
-                    <span style="display: block; margin: 0; font-size: 2.4rem; font-weight: 700; color: {text_color};">EXCO Monthly Reporting</span>
-                    <span style="display: block; margin-top: 0.75rem; font-size: 1.1rem; color: {text_color}; opacity: 0.8;">
-                        Viewing <strong>{sheet_label}</strong> • {total_count} items in current view
-                    </span>
-                </div>
-                <div style="flex: 0 0 auto; background: {badge_bg}; padding: 1rem 1.4rem; border-radius: 0.9rem; text-align: right; backdrop-filter: blur(10px);">
-                    <div style="font-size: 0.85rem; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.7; color: {text_color};">Snapshot Date</div>
-                    <div style="font-size: 1.6rem; font-weight: 700; color: {text_color};">{snapshot_date}</div>
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+
+    # Header with EC badge + title + snapshot
+    header_html = f'''<div style="background: {gradient}; padding: 1.8rem 2.2rem; border-radius: 1.2rem; margin-bottom: 1.2rem; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08); border: 1px solid rgba(0,0,0,0.05);">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 2rem; flex-wrap: wrap;">
+<div style="flex: 1 1 60%; min-width: 240px; display: flex; align-items: center;">
+<div style="background: #00d4aa; width: 52px; height: 66px; border-radius: 8px 8px 26px 26px; margin-right: 1.5rem; position: relative; top: -0.8rem; display: flex; align-items: center; justify-content: center;">
+<span style="color: #1e1a4a; font-family: Arial, sans-serif; font-size: 1.4rem; font-weight: bold;">EC</span>
+</div>
+<div>
+<span style="display: block; margin: 0; font-size: 2.2rem; font-weight: 700; color: {text_color};">EXCO Monthly Reporting ECAG</span>
+<span style="display: block; margin-top: 0.5rem; font-size: 1.1rem; color: {text_color}; opacity: 0.8;">
+Viewing <strong>{sheet_label}</strong> • {total_count} items in current view
+</span>
+</div>
+</div>
+<div style="flex: 0 0 auto; background: {badge_bg}; padding: 1rem 1.4rem; border-radius: 0.9rem; text-align: right; backdrop-filter: blur(10px);">
+<div style="font-size: 0.85rem; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.7; color: {text_color};">Snapshot Date</div>
+<div style="font-size: 1.6rem; font-weight: 700; color: {text_color};">{snapshot_date}</div>
+</div>
+</div>
+</div>'''
+
+    st.markdown(header_html, unsafe_allow_html=True)
 
 
 def render_kpis(df: pd.DataFrame, is_sii: bool = False) -> None:
@@ -437,16 +449,6 @@ def render_distribution_charts(df: pd.DataFrame) -> None:
                 texttemplate="%{label}<br>%{value}",
                 textfont=dict(color="#0f172a", size=14)
             )
-            # Change S4 text to white
-            for i, trace in enumerate(fig_severity.data):
-                if trace.labels is not None and "S4" in trace.labels:
-                    # Find S4 index and update its text color
-                    s4_index = list(trace.labels).index("S4")
-                    colors = ["#ffffff" if label == "S4" else "#0f172a" for label in trace.labels]
-                    fig_severity.update_traces(
-                        textfont=dict(color=colors),
-                        selector=dict(name=trace.name)
-                    )
             fig_severity.update_layout(
                 margin=dict(t=50, r=20, b=10, l=10),
                 paper_bgcolor="rgba(0,0,0,0)",
@@ -981,3 +983,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
