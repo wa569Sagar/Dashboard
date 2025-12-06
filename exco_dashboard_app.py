@@ -881,13 +881,6 @@ def main() -> None:
             st.caption("Tip: hold Cmd/Ctrl to select multiple severities.")
 
         with col_right:
-            status_options = (
-                sorted(df["Recommendation Status"].dropna().unique())
-                if "Recommendation Status" in df.columns
-                else []
-            )
-            status_selection = st.multiselect("Status", status_options, default=status_options)
-
             legal_entity_options: List[str] = []
             if "Relevant Legal Entities" in df.columns:
                 all_entities = (
@@ -904,7 +897,7 @@ def main() -> None:
 
         include_overdue_only = st.toggle("Show overdue only", value=False)
         include_due_soon_only = st.toggle("Show items due in next 30 days only", value=False)
-
+        
         deadline_window: Optional[Tuple[date, date]] = None
         if "Current Deadline" in df.columns and df["Current Deadline"].notna().any():
             min_date = df["Current Deadline"].min().date()
@@ -934,7 +927,7 @@ def main() -> None:
         df=df,
         board_selection=[],
         severities=severity_selection,
-        statuses=status_selection,
+        statuses=[],  # removed status dropdown — use empty list
         legal_entities=legal_selection,
         include_overdue_only=include_overdue_only,
         include_due_soon_only=include_due_soon_only,
@@ -946,7 +939,7 @@ def main() -> None:
         df=df,
         board_selection=board_selection,
         severities=severity_selection,
-        statuses=status_selection,
+        statuses=[],  # removed status dropdown — use empty list
         legal_entities=legal_selection,
         include_overdue_only=include_overdue_only,
         include_due_soon_only=include_due_soon_only,
@@ -983,4 +976,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
