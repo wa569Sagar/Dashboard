@@ -1,99 +1,36 @@
-import pandas as pd
-import numpy as np
- 
-# --- Configuration: Adjust these variables if needed ---
-# I have updated these names to match your latest information.
-EXCEL_FILE_NAME = 'CD710_Settlement_Analysis_Mar_Dec_2025 (2).xlsx'
-SHEET_NAME = 'CD710 Analysis'
-OUTPUT_FILE_NAME = 'unexplained_late_transactions.csv' # The name for the final report
- 
-# Define the columns you expect to be in the file
-# IMPORTANT: Double-check these names against your Excel file's column headers.
-# I am using the names from our previous discussions.
-MEMBER_COL = 'Member'
-TRANSACTION_TYPE_COL = 'Transaction Type Text'
-DEBIT_COL = 'Debit'
-CREDIT_COL = 'Credit'
-DATE_OF_TRANSACTION_COL = 'Date of Transaction'
-TRANSACTION_VALUE_DATE_COL = 'Transaction Value Date'
-# --- End of Configuration ---
- 
-print("Starting the audit script...")
- 
-try:
-    # 1. Load the data from the Excel sheet into a pandas DataFrame
-    print(f"Loading data from '{EXCEL_FILE_NAME}'...")
-    df = pd.read_excel(EXCEL_FILE_NAME, sheet_name=SHEET_NAME)
-    print(f"Successfully loaded {len(df)} rows.")
- 
-    # 2. Clean and prepare the data
-    print("Preparing data for analysis...")
-    # Convert date columns to actual datetime objects
-    df[DATE_OF_TRANSACTION_COL] = pd.to_datetime(df[DATE_OF_TRANSACTION_COL])
-    df[TRANSACTION_VALUE_DATE_COL] = pd.to_datetime(df[TRANSACTION_VALUE_DATE_COL])
- 
-    # Create a single 'Amount' column
-    df['Amount'] = df[DEBIT_COL].where(df[DEBIT_COL] > 0, df[CREDIT_COL])
- 
-    # Create a clear 'Status' column to identify 'Original' vs 'Rereported'
-    # This checks if the word 'Rereported' exists in the transaction type text
-    df['Status'] = np.where(df[TRANSACTION_TYPE_COL].str.contains('Rereported', case=False, na=False), 'Rereported', 'Original')
- 
-    # 3. Separate the data into two DataFrames
-    originals_df = df[df['Status'] == 'Original'].copy()
-    rereported_df = df[df['Status'] == 'Rereported'].copy()
-    print(f"Separated into {len(originals_df)} Original and {len(rereported_df)} Rereported transactions.")
- 
-    # 4. Prepare the 'Rereported' data for matching
-    # We create a "Join Key" which is the business day *before* the rereported transaction date.
-    # This lets us match it back to the original failure date.
-    rereported_df['JoinDate'] = rereported_df[DATE_OF_TRANSACTION_COL] - pd.tseries.offsets.BusinessDay(1)
- 
-    # 5. Perform a "Left Anti-Join" to find Originals with NO match
-    print("Searching for Original transactions that were not corrected...")
-    # We merge the originals with the rereported transactions. If an original has no match,
-    # the columns from the rereported_df will be empty (NaN).
-    unmatched_originals = pd.merge(
-        originals_df,
-        rereported_df[['JoinDate', MEMBER_COL, 'Amount', TRANSACTION_VALUE_DATE_COL]],
-        how='left',
-        left_on=[DATE_OF_TRANSACTION_COL, MEMBER_COL, 'Amount', TRANSACTION_VALUE_DATE_COL],
-        right_on=['JoinDate', MEMBER_COL, 'Amount', TRANSACTION_VALUE_DATE_COL],
-        indicator=True
-    )
- 
-    # Keep only the rows that were 'left_only' (i.e., had no match in the rereported table)
-    unmatched_originals = unmatched_originals[unmatched_originals['_merge'] == 'left_only']
-    print(f"Found {len(unmatched_originals)} Original transactions with no corresponding Rereported entry.")
- 
-    # 6. From the unmatched, find the ones that are actually 'late'
-    print("Calculating settlement times for unmatched transactions...")
-    # Calculate the number of business days between transaction and settlement
-    unmatched_originals['BusinessDaysToSettle'] = np.busday_count(
-        unmatched_originals[DATE_OF_TRANSACTION_COL].values.astype('datetime64[D]'),
-        unmatched_originals[TRANSACTION_VALUE_DATE_COL].values.astype('datetime64[D]')
-    )
- 
-    # Filter for transactions that took more than 2 business days (T+3 or more)
-    late_unexplained_df = unmatched_originals[unmatched_originals['BusinessDaysToSettle'] > 2].copy()
-    print(f"Identified {len(late_unexplained_df)} transactions that are late (>T+2) and unexplained.")
- 
-    # 7. Save the final list to a CSV file for review
-    if not late_unexplained_df.empty:
-        # Clean up the final report by dropping helper columns
-        columns_to_drop = ['Status', '_merge', 'JoinDate']
-        late_unexplained_df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
-        late_unexplained_df.to_csv(OUTPUT_FILE_NAME, index=False)
-        print(f"\nSUCCESS: A report named '{OUTPUT_FILE_NAME}' has been created with the {len(late_unexplained_df)} unexplained late transactions.")
-        print("You should now manually investigate these items for alternative currency settlements (Step 2).")
-    else:
-        print("\nSUCCESS: No unexplained late transactions were found!")
- 
-except FileNotFoundError:
-    print(f"\nERROR: The file '{EXCEL_FILE_NAME}' was not found. Please make sure it's in the same folder as the script.")
-except KeyError as e:
-    print(f"\nERROR: A column was not found in your Excel file. Please check the column names in the configuration section.")
-    print(f"The column that caused the error was: {e}")
-except Exception as e:
-    print(f"\nAn unexpected error occurred: {e}")
- 
+✅ Step 1: Search for a Corrective "Rereported" Transaction
+This is the most common reason for what appears to be a delay. You are checking if the failed payment was successfully corrected on the next business day.
+Question to Answer: Was this failed payment simply re-attempted and corrected?
+What to Look For in Your Excel File:
+Note the Details of the Late Transaction:
+Member Name (e.g., INELO)
+Debit or Credit Amount (e.g., 193.72)
+Transaction Value Date (e.g., 2026-01-02)
+Search Your Data: Look for another transaction that has:
+The exact same Member, Debit/Credit amount, and Transaction Value Date.
+The Original / Rereported column says "Rereported".
+The Date of Transaction is one business day after the late transaction's Date of Transaction.
+Conclusion for this step:
+If you find this matching pair: This is a Handled Exception. The control for fixing failed payments worked correctly. You can document this and move to the next late item.
+If you do NOT find a matching pair: This is potentially a bigger issue. Proceed to Step 2.
+✅ Step 2: Search for an Alternative Currency Payment
+The procedure document mentions that if a debit is expected to fail, the team might agree with the member to collect the funds in an alternative currency. This is a manual process.
+Question to Answer: Was the failed payment settled manually in a different currency?
+What to Look For in Your Excel File:
+Look at the Same Member: Focus on the same member from your late transaction.
+Check the Same and Next Business Day: Look at all transactions for that member on both the Date of Transaction and the day after.
+Look for Manual or Odd Transactions: Search for transactions that look different from the rest. The Transaction Type Text might be unusual or indicate a manual booking. The amount will not be the same, but it might be a rough equivalent in a major currency like EUR or USD.
+Conclusion for this step:
+If you find a plausible alternative payment: This is likely a Handled Exception. It indicates the team followed the manual exception procedure. You may need to ask the cash management team for the written confirmation (email) mentioned in their procedures to fully verify this.
+If you find nothing: The late payment remains unexplained. Proceed to Step 3.
+✅ Step 3: Investigate as a Potential Control Failure
+If you have completed Steps 1 and 2 and still have an unexplained late settlement, you have found a potential control weakness. Now you need to check if the other controls for late payments were followed.
+Question to Answer: If the payment genuinely failed and was not corrected, was it properly managed and penalized according to the procedure?
+What to Request from the Business/Operations Team (this evidence won't be in your file):
+Evidence of Escalation: Ask for emails or system logs showing that the late payment was reported to the Head of Unit/Section, as required by the procedure (especially for large amounts).
+Evidence of Penalty: Ask for the "dedicated Excel sheet" used for penalty calculations. Was a penalty calculated for this late payment? Was a formal notification sent to the member?
+Evidence of Contact: Ask for any logs or notes documenting the phone call that should have been made to the member regarding the late payment.
+Conclusion for this step:
+If the team provides this evidence: The settlement control failed, but the monitoring and penalty controls worked. This is a weakness, but it was managed.
+If the team CANNOT provide this evidence: You have likely found a significant control failure. The payment was late, and there is no evidence that it was corrected, managed, or penalized according to procedure.
+By following this three-step process for every item on your list, you will be able to confidently sort all of your findings into "Handled Exceptions" and "Potential Control Failures."
